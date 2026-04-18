@@ -51,7 +51,7 @@ class CORSJSONResponse(JSONResponse):
         super().__init__(content, status_code, headers)
 
 
-class Person(SQLModel, table=True):
+class Profile(SQLModel, table=True):
     id: uuid.UUID | None = Field(default_factory=uuid.uuid7, primary_key=True)
     display_id: int | None = Field(
         default=None,
@@ -92,7 +92,7 @@ def classify_age(age: int):
     return age_group
 
 
-def _serialize(person: Person, message: str = "success", all: bool = False) -> dict:
+def _serialize(person: Profile, message: str = "success", all: bool = False) -> dict:
     if all:
         return {
             "status": message,
@@ -134,6 +134,7 @@ app.add_middleware(
 )
 
 
+# for httpx.HTTPStatusError requests
 @app.exception_handler(httpx.HTTPStatusError)
 async def external_api_exception_handler(request: Request, exc: httpx.HTTPStatusError):
     api_name = exc.request.headers.get("api_name")
@@ -144,7 +145,7 @@ async def external_api_exception_handler(request: Request, exc: httpx.HTTPStatus
 
 
 @app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
+async def global_exception_handler(request: Request, exc: HTTPException):
     return CORSJSONResponse(content=exc.detail, status_code=exc.status_code)
 
 
@@ -152,7 +153,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 async def classify(name: str, session: SessionDep):
     async with httpx.AsyncClient() as client:
         try:
-            existing = session.exec(select(Person).where(Person.name == name)).first()
+            existing = session.exec(select(Profile).where(Profile.name == name)).first()
 
             if existing:
                 return CORSJSONResponse(
@@ -166,14 +167,23 @@ async def classify(name: str, session: SessionDep):
             params = {"name": name}
             tasks = [
                 client.get(
-                    genderize_url, params=params, headers={"api_name": "Genderize"}
+                    genderize_url,
+                    params=params,
+                    headers={"api_name": "Genderize"},
+                    timeout=5,
                 ),
                 client.get(
                     nationalize_url,
                     params=params,
                     headers={"api_name": "Nationalize"},
+                    timeout=5,
                 ),
-                client.get(agify_url, params=params, headers={"api_name": "Agify"}),
+                client.get(
+                    agify_url,
+                    params=params,
+                    headers={"api_name": "Agify"},
+                    timeout=5,
+                ),
             ]
 
             (
@@ -218,7 +228,7 @@ async def classify(name: str, session: SessionDep):
 
             country = nationalize_data["country"][0]
 
-            person = Person(
+            person = Profile(
                 name=name,
                 gender=genderize_data["gender"],
                 gender_probability=genderize_data["probability"],
@@ -234,7 +244,9 @@ async def classify(name: str, session: SessionDep):
                 session.commit()
             except IntegrityError:
                 session.rollback()
-                existing = session.exec(select(Person).where(Person.name == name)).one()
+                existing = session.exec(
+                    select(Profile).where(Profile.name == name)
+                ).one()
                 return CORSJSONResponse(
                     _serialize(existing, message="Profile Already Exists"), 200
                 )
@@ -245,8 +257,8 @@ async def classify(name: str, session: SessionDep):
                 201,
             )
         except Exception:
-            return CORSJSONResponse(
-                {"status": "error", "message": "An unexpected error occurred"},
+            raise HTTPException(
+                detail={"status": "error", "message": "An unexpected error occurred"},
                 status_code=500,
             )
 
@@ -255,19 +267,24 @@ async def classify(name: str, session: SessionDep):
 async def get_profile(display_id: int, session: SessionDep):
     try:
         profile = session.exec(
-            select(Person).where(Person.display_id == display_id)
+            select(Profile).where(Profile.display_id == display_id)
         ).first()
 
         if profile:
             return CORSJSONResponse(_serialize(profile))
         else:
-            return CORSJSONResponse(
-                content={"status": "error", "message": "profile not found"},
+            raise HTTPException(
+                detail={"status": "error", "message": "profile not found"},
                 status_code=404,
             )
     except RequestValidationError:
-        return CORSJSONResponse(
-            content={"status": "error", "message": "invalid type int"}, status_code=422
+        return HTTPException(
+            detail={"status": "error", "message": "invalid type int"}, status_code=422
+        )
+    except Exception:
+        raise HTTPException(
+            detail={"status": "error", "message": "An unexpected error occurred"},
+            status_code=500,
         )
 
 
@@ -278,59 +295,71 @@ async def get_profiles(
     country_id: str | None = None,
     age_group: str | None = None,
 ):
-    statement = select(Person)
+    try:
+        statement = select(Profile)
 
-    # builds select statement dynamically, lower() and .upper() for case insensitivity
-    if gender:
-        statement = statement.where(Person.gender == gender.lower())
-    if country_id:
-        statement = statement.where(Person.country_id == country_id.upper())
-    if age_group:
-        statement = statement.where(Person.age_group == age_group.lower())
+        # builds select statement dynamically, lower() and .upper() for case insensitivity
+        if gender:
+            statement = statement.where(Profile.gender == gender.lower())
+        if country_id:
+            statement = statement.where(Profile.country_id == country_id.upper())
+        if age_group:
+            statement = statement.where(Profile.age_group == age_group.lower())
 
-    # if no filters provided, return an error instead of all profiles
-    if not gender and not country_id and not age_group:
-        return CORSJSONResponse(
-            {
-                "status": "error",
-                "message": "missing or empty parameters",
-            },
-            400,
-        )
+        # if no filters provided, return an error instead of all profiles
+        if not gender and not country_id and not age_group:
+            raise HTTPException(
+                detail={
+                    "status": "error",
+                    "message": "missing or empty parameters",
+                },
+                status_code=400,
+            )
 
-    # execute the select statement and returns a sequence of profiles
-    profiles = session.exec(statement).fetchall()
-    count = len(profiles)
+        # execute the select statement and returns a sequence of profiles
+        profiles = session.exec(statement).fetchall()
+        count = len(profiles)
 
-    if count:
-        results = []
-        for profile in profiles:
-            results.append(_serialize(profile, all=True))
+        if count:
+            results = []
+            for profile in profiles:
+                results.append(_serialize(profile, all=True))
 
-        return CORSJSONResponse(
-            {"status": "success", "count": count, "data": results},
-        )
-    else:
-        return CORSJSONResponse(
-            {"status": "error", "message": "profile not found"},
-            404,
+            return CORSJSONResponse(
+                {"status": "success", "count": count, "data": results},
+            )
+        else:
+            raise HTTPException(
+                detail={"status": "error", "message": "profile not found"},
+                status_code=404,
+            )
+    except Exception:
+        raise HTTPException(
+            detail={"status": "error", "message": "An unexpected error occurred"},
+            status_code=500,
         )
 
 
 @app.delete("/api/profiles/{id}")
 async def delete_profile(session: SessionDep, display_id: int):
-    profile = session.exec(
-        select(Person).where(Person.display_id == display_id)
-    ).first()
+    try:
+        profile = session.exec(
+            select(Profile).where(Profile.display_id == display_id)
+        ).first()
 
-    if profile:
-        session.delete(profile)
-        session.commit()
-        return CORSJSONResponse(content=None, status_code=204)
-    else:
-        return CORSJSONResponse(
-            {"status": "error", "message": "profile not found"},
-            404,
+        if profile:
+            session.delete(profile)
+            session.commit()
+            return CORSJSONResponse(content=None, status_code=204)
+        else:
+            return CORSJSONResponse(
+                {"status": "error", "message": "profile not found"},
+                404,
+            )
+    except Exception:
+        raise HTTPException(
+            detail={"status": "error", "message": "An unexpected error occurred"},
+            status_code=500,
         )
 
 
