@@ -148,7 +148,7 @@ async def get_profile(id: int, session: SessionDep):
                 {"status": "error", "message": "empty or missing id parameter"}
             )
 
-        profile = session.exec(select(Profile).where(Profile.display_id == id)).first()
+        profile = session.exec(select(Profile).where(Profile.id == id)).first()
 
         if profile:
             return CORSJSONResponse(_serialize(profile))
@@ -157,10 +157,6 @@ async def get_profile(id: int, session: SessionDep):
                 content={"status": "error", "message": "profile not found"},
                 status_code=404,
             )
-    except RequestValidationError:
-        return HTTPException(
-            detail={"status": "error", "message": "invalid type int"}, status_code=422
-        )
     except Exception:
         raise HTTPException(
             detail={"status": "error", "message": "An unexpected error occurred"},
@@ -211,7 +207,7 @@ async def get_profiles(
 @router.delete("/{id}")
 async def delete_profile(session: SessionDep, id: int):
     try:
-        profile = session.exec(select(Profile).where(Profile.display_id == id)).first()
+        profile = session.exec(select(Profile).where(Profile.id == id)).first()
 
         if profile:
             session.delete(profile)
