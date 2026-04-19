@@ -29,7 +29,12 @@ async def create_profile(payload: CreateProfile, session: SessionDep):
             existing = session.exec(select(Profile).where(Profile.name == name)).first()
 
             if existing:
-                return CORSJSONResponse(_serialize(existing, exists=True), 200)
+                return CORSJSONResponse(
+                    _serialize(
+                        existing,
+                    ),
+                    200,
+                )
 
             genderize_url = "https://api.genderize.io"
             nationalize_url = "https://api.nationalize.io"
