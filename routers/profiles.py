@@ -17,8 +17,15 @@ router = APIRouter(prefix="/api/profiles", tags=["profiles"])
 @router.post("")
 async def create_profile(payload: CreateProfile, session: SessionDep):
     async with httpx.AsyncClient() as client:
-        name = payload.name
         try:
+            name = payload.name
+
+            if not name:
+                return CORSJSONResponse(
+                    {"status": "error", "message": "missing or empty name"},
+                    status_code=400,
+                )
+
             existing = session.exec(select(Profile).where(Profile.name == name)).first()
 
             if existing:
@@ -117,7 +124,7 @@ async def create_profile(payload: CreateProfile, session: SessionDep):
                     select(Profile).where(Profile.name == name)
                 ).one()
                 return CORSJSONResponse(
-                    _serialize(existing, message="Profile Already Exists"), 200
+                    _serialize(existing, message="already Exists"), 200
                 )
 
             session.refresh(person)
