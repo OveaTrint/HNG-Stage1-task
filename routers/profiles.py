@@ -141,7 +141,7 @@ async def create_profile(payload: CreateProfile, session: SessionDep):
 
 
 @router.get("/{id}")
-async def get_profile(id: int, session: SessionDep):
+async def get_profile(id: str, session: SessionDep):
     try:
         if not id:
             return CORSJSONResponse(
@@ -205,7 +205,7 @@ async def get_profiles(
 
 
 @router.delete("/{id}")
-async def delete_profile(session: SessionDep, id: int):
+async def delete_profile(session: SessionDep, id: str):
     try:
         profile = session.exec(select(Profile).where(Profile.id == id)).first()
 
