@@ -29,9 +29,7 @@ async def create_profile(payload: CreateProfile, session: SessionDep):
             existing = session.exec(select(Profile).where(Profile.name == name)).first()
 
             if existing:
-                return CORSJSONResponse(
-                    _serialize(existing, message="Profile Already Exists"), 200
-                )
+                return CORSJSONResponse(_serialize(existing, exists=True), 200)
 
             genderize_url = "https://api.genderize.io"
             nationalize_url = "https://api.nationalize.io"
@@ -123,9 +121,7 @@ async def create_profile(payload: CreateProfile, session: SessionDep):
                 existing = session.exec(
                     select(Profile).where(Profile.name == name)
                 ).one()
-                return CORSJSONResponse(
-                    _serialize(existing, message="already Exists"), 200
-                )
+                return CORSJSONResponse(_serialize(existing, exists=True), 200)
 
             session.refresh(person)
             return CORSJSONResponse(
@@ -142,6 +138,11 @@ async def create_profile(payload: CreateProfile, session: SessionDep):
 @router.get("/{id}")
 async def get_profile(id: int, session: SessionDep):
     try:
+        if not id:
+            return CORSJSONResponse(
+                {"status": "error", "message": "empty or missing id parameter"}
+            )
+
         profile = session.exec(select(Profile).where(Profile.display_id == id)).first()
 
         if profile:
@@ -178,15 +179,6 @@ async def get_profiles(
             statement = statement.where(Profile.country_id == country_id.upper())
         if age_group:
             statement = statement.where(Profile.age_group == age_group.lower())
-
-        if not gender and not country_id and not age_group:
-            return CORSJSONResponse(
-                content={
-                    "status": "error",
-                    "message": "missing or empty parameters",
-                },
-                status_code=400,
-            )
 
         profiles = session.exec(statement).fetchall()
         count = len(profiles)
