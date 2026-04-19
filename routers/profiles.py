@@ -8,15 +8,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from database.database import SessionDep
-from models.profile import Profile
+from models.profile import CreateProfile, Profile
 from utils.helpers import CORSJSONResponse, _serialize, classify_age
 
 router = APIRouter(prefix="/api/profiles", tags=["profiles"])
 
 
 @router.post("")
-async def create_profile(name: str, session: SessionDep):
+async def create_profile(payload: CreateProfile, session: SessionDep):
     async with httpx.AsyncClient() as client:
+        name = payload.name
         try:
             existing = session.exec(select(Profile).where(Profile.name == name)).first()
 
@@ -132,11 +133,9 @@ async def create_profile(name: str, session: SessionDep):
 
 
 @router.get("/{id}")
-async def get_profile(display_id: int, session: SessionDep):
+async def get_profile(id: int, session: SessionDep):
     try:
-        profile = session.exec(
-            select(Profile).where(Profile.display_id == display_id)
-        ).first()
+        profile = session.exec(select(Profile).where(Profile.display_id == id)).first()
 
         if profile:
             return CORSJSONResponse(_serialize(profile))
@@ -206,11 +205,9 @@ async def get_profiles(
 
 
 @router.delete("/{id}")
-async def delete_profile(session: SessionDep, display_id: int):
+async def delete_profile(session: SessionDep, id: int):
     try:
-        profile = session.exec(
-            select(Profile).where(Profile.display_id == display_id)
-        ).first()
+        profile = session.exec(select(Profile).where(Profile.display_id == id)).first()
 
         if profile:
             session.delete(profile)

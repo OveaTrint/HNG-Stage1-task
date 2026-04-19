@@ -2,8 +2,13 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
+from pydantic import BaseModel
 from sqlalchemy import Column, Integer
 from sqlmodel import DateTime, Field, Identity, SQLModel, text
+
+
+class CreateProfile(BaseModel):
+    name: str
 
 
 class Profile(SQLModel, table=True):
